@@ -1,0 +1,372 @@
+<html>
+<head>
+	<meta name="viewport" content="width=device-width, initial-scale=1">
+	<script src="/js/vendor/socket.io-client/socket.io.js"></script>
+	<script src="/js/vendor/jquery/dist/jquery.js"></script>
+	<script src="/js/vendor/twentytwenty/js/jquery.event.move.js"></script>
+	<script src="/js/vendor/twentytwenty/js/jquery.twentytwenty.js"></script>
+	<script src="/js/vendor/underscore/underscore.js"></script>
+	<link rel="stylesheet" href="/js/vendor/twentytwenty/css/twentytwenty.css" type="text/css" media="screen" />
+
+	<script>
+	var $beacons = {};
+	var knownBeacons;
+	var movingAverage = {x: 0, y:0};
+	var foundBeacons = 0;
+
+
+	$(function(){
+		var $map = $('#map');
+		var $locator = $('#locator');
+
+		var limits ={
+			maxx: 2005.516845703125,
+			maxy: 3123.140375725177,
+			minx: 47.1641720527353,
+			miny: 768.1896362304688
+		};
+		var regions = [
+			{
+				id: 'wallach-orientation-center',
+				name: 'Wallach Orientation Center',
+				top: 19,
+			    left: 3,
+			    height: 18,
+			    width: 22
+			},
+			{
+				id: 'research-library',
+				name: 'Research Library',
+			    top: 0,
+			    left: 35,
+			    height: 21,
+			    width: 10
+			},
+			{
+				id: 'vertebrate-origins',
+				name: 'Vertebrate Origins',
+				top: 21,
+			    left: 25,
+			    height: 13,
+			    width: 41
+			},
+			{
+				id: 'millstein',
+				name: 'Millstein Hall of Advanced Mammals',
+				top: 38,
+				left: 3,
+				height: 25,
+				width: 22
+			}
+		];
+		var currentRegion = regions[3];
+
+		function normalizeDimensions(dimX, dimY){
+			return [
+				((dimX - limits.minx) / limits.maxx) * 100,
+				((dimY - limits.miny) / limits.maxy) * 100
+			];
+		}
+
+		function drawMap(){
+			_.each(knownBeacons, function(beacon){
+				drawBeacon(beacon);
+			})
+		}
+
+		function drawRegions(){
+			_.each(regions, function(region){
+				var $region = $('<div class="region" />');
+				$region.css({
+					top: region.top  + '%',
+					left: region.left + '%',
+					height: region.height + '%',
+					width: region.width + '%'
+				});
+				$map.append($region);
+			})
+		}
+
+		function drawBeacon(beacon){
+			var normalized = normalizeDimensions(beacon.x, beacon.y);
+			var $beacon = $('<div class="beacon" />').css({
+				left: normalized[0] + '%',
+				top: normalized[1] + '%'
+			});
+			$map.append($beacon);
+			$beacons[beacon.minor] = $beacon;
+		}
+
+		function positionLocator(){
+			var normalized = normalizeDimensions(movingAverage.x, movingAverage.y);
+			var top = normalized[1];
+			var left = normalized[0];
+			$locator.css({
+				left: left + '%',
+				top: top + '%'
+			});
+			newRegion = _.find(regions, function(region){
+				return top >= region.top &&
+				top <= region.top + region.height &&
+				left >= region.left &&
+				left <= region.left + region.width
+			});
+			if(newRegion != currentRegion){
+				currentRegion = newRegion;
+				onRegionChange();
+			}
+
+		}
+
+		function onRegionChange(){
+			console.log('Region Change', currentRegion);
+			$('.region-page').removeClass('current').filter('#'+currentRegion.id).addClass('current');
+			$('audio').each(function(){
+				this.pause();
+				this.currentTime = 0;
+			});
+			var audio = $('#'+currentRegion.id).find('audio')[0];
+			if(audio){
+				audio.play();
+			}
+			regionChange = function(){};
+		}
+
+		function onBeaconFound(beacon){
+			// console.log(beacon);
+			$beacons[beacon.minor].addClass('found');
+			$beacons[beacon.minor].addClass(beacon.proximity);
+			$beacons[beacon.minor].css({
+				transform: 'scale('+ Math.max(1,(-50 / beacon.rssi) * 2) +')'
+			});
+
+			// Calculate moving average
+			var weight = 5 - foundBeacons;
+			movingAverage.x = ((weight * beacon.x) + (foundBeacons * movingAverage.x)) / 5;
+			movingAverage.y = ((weight * beacon.y) + (foundBeacons * movingAverage.y)) / 5;
+
+			if( foundBeacons < 4 ){
+				foundBeacons++;
+			}
+			positionLocator();
+		}
+		var socket = io.connect(window.document.location.origin);
+		socket.on('beacon', onBeaconFound);
+
+		$.getJSON("beacons.json", function(result){
+			knownBeacons = result;
+			drawMap();
+			drawRegions();
+			onRegionChange();
+		});
+		$('.twentytwenty-container').twentytwenty();
+	});
+	</script>
+	<style>
+	body{
+		padding: 0;
+		margin: 0;
+		font-family: "Bodoni 72 Smallcaps";
+		color: #fff;
+	}
+	.beacon{
+		height: 10px;
+		width: 10px;
+		border-radius:50%;
+		background: gray;
+		position: absolute;
+	}
+	.beacon.found{
+		background-color: yellow;
+	}
+	#locator{
+		width: 5px;
+		height: 5px;
+		border-radius: 50%;
+		background-color: #3AF;
+		position: absolute;
+		transition: .5s;
+	}
+	#map{
+		height: 515px;
+		width: 373px;
+	    position: relative;
+	    background: url(img/map.jpg);
+	    background-position: 31% 366%;
+	    background-size: 204%;
+	    left:-1000px;
+	}
+	.region{
+		border: 1px solid blue;
+		position: absolute;
+	}
+	.sepia-filter{
+		position:fixed;
+		top:0;
+		left:0;
+		height:100%;
+		width: 100%;
+		background: #ffff66;
+		opacity: .15;
+		pointer-events: none
+	}
+
+	.region-pages{
+		position:absolute;
+		top:0;
+		left:0;
+		min-height:100%;
+		width: 100%;
+	}
+	.region-page{
+		position:absolute;
+		top:0;
+		left:0;
+		min-height:100%;
+		width: 100%;
+		background: #000;
+		display: none;
+	}
+	.region-page.current{
+		display:block;
+	}
+	.region-page-content{
+		text-align: center;
+		position:relative;
+	}
+	.region-page-content img{
+		width:100%;
+	}
+	.region-timeline{
+		text-align: left;
+		padding: 2em;
+		font-family: 'georgia';
+	}
+	h1{
+		font-size: 3.2em;
+	    line-height: .9em;
+	    margin-bottom: .3em;
+	}
+	h2{
+		font-family: copperplate;
+		font-weight: 100;
+		font-size: 1.5em;
+		border-top: 1px solid #fff;
+		margin: 0 auto;
+		width: 234px;
+		text-align: center;
+		padding-top: 10px;
+		margin-bottom: 1em;
+	}
+	h3{
+		text-align: center;
+	}
+	.region-page-background{
+		opacity: .8;
+	}
+	#wallach-orientation-center .region-page-background{
+		background-image:url(img/regions/opening-wallpaper.jpg);
+		background-size: cover;
+		background-position:center center;
+		position: absolute;
+		top:0;
+		width:100%;
+		height: 100%;
+	}
+	#wallach-orientation-center h1{
+	    margin-top: 100px;
+	}
+	#logo{
+		width:50%;
+		margin-top: 10%;
+	}
+	#logo img{
+		width: 100%;
+	}
+	p.current-hall{
+		position: absolute;
+		bottom: 30px;
+		width: 100%;
+		display: block;
+		text-align: center;
+	}
+	.twentytwenty-wrapper{
+		margin: 0 auto;
+    	width: 300px;
+	}
+	.twentytwenty-container img{
+		width: 300px;
+		height:300px;
+	}
+	</style>
+</head>
+<body>
+	<div id="map"></div>
+	<div id="locator"></div>
+	<div class="region-pages">
+		<div class="region-page" id="wallach-orientation-center">
+			<div class="region-page-background"></div>
+			<div class="region-page-content">
+				<img src="img/amnh-logo.png" id="logo">
+				<h1>Museum Time Machine</h1>
+				<h2>
+					Walk the halls.<br />Learn the story.
+				</h2>
+			</div>
+			<p class="current-hall">
+				Current Hall: Wallach Orientation Center
+			</p>
+			<audio src="audio/intro.mp3">
+		</div>
+
+
+		<div class="region-page" id="research-library">
+			<div class="region-page-background"></div>
+			<div class="region-page-content">
+				<img src="img/amnh-logo.png" id="logo">
+				<h1>Research Library</h1>
+				<h2>
+					From humble beginnings...
+				</h2>
+			</div>
+			<p class="current-hall">
+				Current Hall: Research Library
+			</p>
+		</div>
+
+
+		<div class="region-page" id="millstein">
+			<div class="region-page-background"></div>
+			<div class="region-page-content">
+				<img src="img/amnh-logo.png" id="logo">
+				<h1>Millstein Hall of Advanced Mammals</h1>
+				<h2>
+					A story of humble beginnings
+				</h2>
+				<div class="twentytwenty-container">
+					<img src="img/regions/Mastodon1907.jpg">
+					<img src="img/regions/MastodonToday.jpg">
+				</div>
+				<div class="region-timeline">
+					<h3>1893</h3>
+					<p>
+						This would be some text about the history of this hall as narrated by a historian person. The Paul and Irma Milstein Hall of Advanced Mammals is one of two halls in the Lila Acheson Wallace Wing of Mammals and Their Extinct Relatives, which together tell of the great diversification and sudden extinctions of this group of animals.
+					</p>
+					<h3>1900</h3>
+					<img src="img/regions/Hall of Vertebrate Origins 1900.jpg">
+					<h3>1938</h3>
+					<img src="img/regions/Hall of Vertebrate Origins 1938.jpg">
+				</div>
+			</div>
+			<p class="current-hall">
+				Current Hall: Vertebrate Origins
+			</p>
+			<audio src="audio/milstein.mp3">
+		</div>
+	</div>
+
+
+
+	<div class="sepia-filter"></div>
+</body>
+</html>
